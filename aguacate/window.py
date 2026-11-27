@@ -31,6 +31,7 @@ class AvocadoWindow(QWidget):
         self.beeper.volume = cfg["volume"]
         self.beeper.beep_ms = cfg["beep_ms"]
         self.beeper.frequency = cfg["beep_frequency"]
+        self.beeper.prepare()
 
         self.setWindowTitle("Aguacate Pomodoro")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -51,6 +52,7 @@ class AvocadoWindow(QWidget):
         self._press_global = None
         self._press_win = None
         self._dragging = False
+        self._temp_on_top = False   # encima temporalmente porque ha acabado un tiempo
 
     # ---- ventana -------------------------------------------------------------
     def _apply_flags(self, on_top: bool):
@@ -98,20 +100,25 @@ class AvocadoWindow(QWidget):
                 self._start_shake()
         elif ev == EV_BREAK_DONE:
             self.beeper.soft_chime()
+            self._bring_to_front()
         self.update()
 
     def _on_avocado_click(self):
         if self.pomo.status == ALARM:
             self.beeper.stop()
             self._stop_shake()
+        self._end_temp_on_top()
         self.pomo.click()
         self.update()
 
     def _bring_to_front(self):
-        """Saca el aguacate por encima de otras ventanas al sonar la alarma.
-        Windows a veces impide robar el foco: en ese caso parpadea en la barra de tareas."""
+        """Al acabar un tiempo, pone el aguacate por encima de todas las ventanas
+        hasta el siguiente clic (aunque «Siempre encima» esté desactivado)."""
         if self.isMinimized():
             self.showNormal()
+        if not self.cfg["always_on_top"] and not self._temp_on_top:
+            self._temp_on_top = True
+            self._set_on_top_keep_pos(True)
         self.raise_()
         self.activateWindow()
         QApplication.alert(self)
@@ -231,14 +238,24 @@ class AvocadoWindow(QWidget):
     def _reset(self):
         self.beeper.stop()
         self._stop_shake()
+        self._end_temp_on_top()
         self.pomo.reset()
         self.update()
 
-    def _toggle_on_top(self, on):
-        self.cfg["always_on_top"] = on
-        pos = self.pos()
+    def _end_temp_on_top(self):
+        if self._temp_on_top:
+            self._temp_on_top = False
+            self._set_on_top_keep_pos(self.cfg["always_on_top"])
+
+    def _set_on_top_keep_pos(self, on):
+        pos = self._shake_base if self._shake.isActive() else self.pos()
         self._apply_flags(on)
         self.move(pos)
+
+    def _toggle_on_top(self, on):
+        self.cfg["always_on_top"] = on
+        self._temp_on_top = False
+        self._set_on_top_keep_pos(on)
 
     def closeEvent(self, e):
         self.beeper.stop()

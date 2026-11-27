@@ -42,9 +42,10 @@ python main.py --demo   # pruebas: 10 s trabajo / 5 s descanso
 - El hueso desaparece con un barrido en sentido horario a medida que pasa el tiempo.
 - El contador está dentro del aguacate: verde = trabajo, azul = descanso.
   ▶ = listo para empezar, ❚❚ = en pausa.
-- Por defecto otras ventanas pueden tapar el aguacate; al sonar la alarma sale al frente.
-  Si lo quieres siempre visible, activa «Siempre encima» en el menú.
-- Al acabar el trabajo: pitido repetido y vibración hasta que hagas clic.
+- Por defecto otras ventanas pueden tapar el aguacate. Cuando acaba un tiempo se pone
+  encima de todo hasta que hagas clic. Si lo quieres siempre visible, activa
+  «Siempre encima» en el menú.
+- Al acabar el trabajo: «ding-dong» suave repetido y vibración hasta que hagas clic.
 - Al acabar el descanso: un sonido suave; el siguiente trabajo empieza con un clic.
 
 ## Actualizar a la última versión

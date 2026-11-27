@@ -4,9 +4,9 @@ DEFAULTS = {
     "work_minutes": 25,
     "break_minutes": 5,
     "always_on_top": False,
-    "volume": 0.6,            # 0.0 – 1.0
-    "beep_ms": 250,           # duración de cada pitido
-    "beep_frequency": 880,    # Hz
+    "volume": 0.45,           # 0.0 – 1.0
+    "beep_ms": 300,           # duración de cada nota de la alarma
+    "beep_frequency": 523,    # Hz (Do5)
     "vibration": True,
     "blocked_domains": [
         "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",

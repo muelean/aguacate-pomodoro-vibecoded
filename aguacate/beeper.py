@@ -1,20 +1,30 @@
-"""Sonidos generados por código (onda senoidal PCM de 16 bits), sin archivos.
+"""Sonidos generados por código, sin archivos incluidos en el proyecto.
 
-- alarm: "bip-bip" que se repite hasta llamar a stop().
-- soft_chime: dos notas suaves descendentes, una sola vez (fin del descanso).
+- alarm: "ding-dong" suave (dos notas con caída tipo marimba) que se repite
+  hasta llamar a stop().
+- soft_chime: las mismas notas al revés y más bajas, una sola vez (fin del descanso).
+
+Al arrancar se generan las muestras y se guardan como WAV en la carpeta temporal.
+En Windows se reproducen con winsound (API PlaySound), que repite el bucle sin
+abrir y cerrar la salida de audio en cada pitido. En otros sistemas (solo para
+desarrollo) se usa QSoundEffect.
 """
 import math
+import os
+import sys
+import tempfile
+import wave
 from array import array
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QTimer
-from PySide6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QObject
 
 RATE = 44100
+IS_WINDOWS = sys.platform == "win32"
 
 
+# ---- síntesis -----------------------------------------------------------------
 def tone(freq: float, ms: int, volume: float, fade_ms: int = 8) -> array:
-    """Muestras de una nota con fundido de entrada/salida (evita chasquidos)."""
+    """Nota plana con fundido de entrada/salida (evita chasquidos)."""
     n = int(RATE * ms / 1000)
     fade = max(1, int(RATE * fade_ms / 1000))
     amp = 32767 * max(0.0, min(1.0, volume))
@@ -25,79 +35,102 @@ def tone(freq: float, ms: int, volume: float, fade_ms: int = 8) -> array:
     return out
 
 
+def soft_note(freq: float, ms: int, volume: float) -> array:
+    """Nota suave: ataque de 12 ms, caída exponencial y un poco de 2º armónico."""
+    n = int(RATE * ms / 1000)
+    attack = int(RATE * 0.012)
+    amp = 32767 * max(0.0, min(1.0, volume)) / 1.25    # 1.25 = suma de armónicos
+    out = array("h")
+    for i in range(n):
+        t = i / RATE
+        env = (i / attack) if i < attack else math.exp(-5.0 * (i - attack) / n)
+        env *= min(1.0, (n - 1 - i) / (RATE * 0.005))   # cierre sin chasquido
+        s = math.sin(2 * math.pi * freq * t) + 0.25 * math.sin(4 * math.pi * freq * t)
+        out.append(int(amp * env * s))
+    return out
+
+
 def silence(ms: int) -> array:
     return array("h", bytes(2 * int(RATE * ms / 1000)))
 
 
-def alarm_pattern(freq: float, beep_ms: int, volume: float) -> array:
-    """bip – pausa – bip – pausa larga."""
-    pcm = tone(freq, beep_ms, volume)
-    pcm += silence(beep_ms // 2)
-    pcm += tone(freq, beep_ms, volume)
-    pcm += silence(700)
+def alarm_pattern(freq: float, note_ms: int, volume: float) -> array:
+    """ding (freq) – dong (una tercera mayor más aguda) – silencio."""
+    pcm = soft_note(freq, note_ms, volume)
+    pcm += soft_note(freq * 1.26, int(note_ms * 1.6), volume)
+    pcm += silence(900)
     return pcm
 
 
-def chime_pattern(volume: float) -> array:
-    v = volume * 0.5
-    pcm = tone(660, 180, v, fade_ms=30)
-    pcm += tone(523, 320, v, fade_ms=60)
-    return pcm
+def chime_pattern(freq: float, note_ms: int, volume: float) -> array:
+    v = volume * 0.6
+    return soft_note(freq * 1.26, note_ms, v) + soft_note(freq, int(note_ms * 1.8), v)
 
 
+def write_wav(path: str, pcm: array):
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(pcm.tobytes())
+
+
+# ---- reproducción -------------------------------------------------------------
 class Beeper(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
-        fmt = QAudioFormat()
-        fmt.setSampleRate(RATE)
-        fmt.setChannelCount(1)
-        fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-        self._format = fmt
-        self._sink = None
-        self._buffer = None
-        self._data = None
-        self._alarm_pcm = None
-        self._loop = QTimer(self)
-        self._loop.timeout.connect(self._play_alarm_once)
-        self.volume = 0.6
-        self.beep_ms = 250
-        self.frequency = 880
+        self.volume = 0.45
+        self.beep_ms = 300
+        self.frequency = 523
+        self._dir = os.path.join(tempfile.gettempdir(), "aguacate")
+        os.makedirs(self._dir, exist_ok=True)
+        self._alarm_wav = os.path.join(self._dir, "alarma.wav")
+        self._chime_wav = os.path.join(self._dir, "descanso.wav")
+        self._alarm_active = False
+        self._effects = {}       # solo fuera de Windows
 
-    # ---- API ----------------------------------------------------------------
+    def prepare(self):
+        """Genera los WAV con los ajustes actuales. Llamar tras cambiar volumen, etc."""
+        write_wav(self._alarm_wav, alarm_pattern(self.frequency, self.beep_ms, self.volume))
+        write_wav(self._chime_wav, chime_pattern(self.frequency, self.beep_ms, self.volume))
+        self._effects.clear()
+
     def start_alarm(self):
-        self._alarm_pcm = alarm_pattern(self.frequency, self.beep_ms, self.volume)
-        cycle_ms = int(len(self._alarm_pcm) * 1000 / RATE)
-        self._play_alarm_once()
-        self._loop.start(cycle_ms)
-
-    def stop(self):
-        self._loop.stop()
-        if self._sink is not None:
-            self._sink.stop()
+        self._alarm_active = True
+        self._play(self._alarm_wav, loop=True)
 
     def soft_chime(self):
         self.stop()
-        self._play(chime_pattern(self.volume))
+        self._play(self._chime_wav, loop=False)
+
+    def stop(self):
+        self._alarm_active = False
+        if IS_WINDOWS:
+            import winsound
+            winsound.PlaySound(None, 0)
+        else:
+            for e in self._effects.values():
+                e.stop()
 
     def is_alarm_active(self) -> bool:
-        return self._loop.isActive()
+        return self._alarm_active
 
-    # ---- interno ------------------------------------------------------------
-    def _play_alarm_once(self):
-        self._play(self._alarm_pcm)
-
-    def _play(self, pcm: array):
-        device = QMediaDevices.defaultAudioOutput()
-        if device.isNull():
-            QApplication.beep()      # sin tarjeta de sonido: pitido del sistema
+    def _play(self, path: str, loop: bool):
+        if not os.path.exists(path):
+            self.prepare()
+        if IS_WINDOWS:
+            import winsound
+            flags = winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
+            if loop:
+                flags |= winsound.SND_LOOP
+            winsound.PlaySound(path, flags)
             return
-        if self._sink is not None:
-            self._sink.stop()
-        self._sink = QAudioSink(device, self._format, self)
-        self._data = QByteArray(pcm.tobytes())
-        self._buffer = QBuffer(self)
-        self._buffer.setData(self._data)
-        self._buffer.open(QIODevice.OpenModeFlag.ReadOnly)
-        self._sink.start(self._buffer)
-        if self._sink.error() != QAudio.Error.NoError:
-            QApplication.beep()
+        from PySide6.QtCore import QUrl
+        from PySide6.QtMultimedia import QSoundEffect
+        effect = self._effects.get(path)
+        if effect is None:
+            effect = QSoundEffect(self)
+            effect.setSource(QUrl.fromLocalFile(path))
+            self._effects[path] = effect
+        effect.setLoopCount(QSoundEffect.Loop.Infinite.value if loop else 1)
+        effect.play()

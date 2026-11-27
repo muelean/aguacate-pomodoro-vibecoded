@@ -1,22 +1,20 @@
-"""Dibujo del aguacate con QPainter.
+"""Dibujo del aguacate con QPainter, todo en pixel art.
 
-- Cuerpo (cáscara y pulpa) en pixel art: se rasteriza la silueta Bézier sobre una
-  rejilla de celdas de PIXEL px y cada celda se pinta de un color plano.
-- Hueso liso (no pixelado). Se borra con un barrido en sentido horario desde las 12.
-- Contador MM:SS con una fuente de píxeles 5x7 definida aquí mismo (sin archivos).
+- La silueta Bézier se rasteriza sobre una rejilla de celdas de PIXEL px.
+- El hueso usa la misma rejilla. Se borra celda a celda con un barrido en sentido
+  horario desde las 12; donde ya no hay hueso se ve el hueco de la pulpa.
+- Contador MM:SS en un recuadro propio, con una fuente de píxeles 5x7 definida aquí.
 """
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (
-    QBrush, QColor, QImage, QPainter, QPainterPath, QRadialGradient, QTransform,
-)
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QTransform
 
-PIXEL = 8           # tamaño de cada "píxel" del aguacate
+PIXEL = 8           # tamaño de cada "píxel" del aguacate y del hueso
 FONT_PIXEL = 3      # tamaño de cada píxel de la fuente del contador
 
-# Paleta (pocos colores, como en pixel art)
+# Paleta
 OUTLINE = QColor("#14240B")
 SKIN = QColor("#2F5418")
 SKIN_SHINE = QColor("#4A7A26")
@@ -24,14 +22,21 @@ FLESH_RIM = QColor("#9CC447")
 FLESH_1 = QColor("#C4DE6A")
 FLESH_2 = QColor("#DDEB8E")
 FLESH_3 = QColor("#EEF4B4")
-CAVITY = QColor("#D2E48C")
-PIT_DARK = QColor("#5A3416")
-PIT_LIGHT = QColor("#A8693A")
-TEXT_WORK = QColor("#1F3A12")
-TEXT_BREAK = QColor("#1D6A7A")
-TEXT_SHADOW = QColor(255, 255, 255, 110)
+CAVITY = QColor("#D4E591")
+CAVITY_RIM = QColor("#B9D271")
+PIT_OUTLINE = QColor("#3A1F0B")
+PIT_DARK = QColor("#6B3E1A")
+PIT_MID = QColor("#8A5227")
+PIT_LIGHT = QColor("#AC6C3A")
+PIT_SHINE = QColor("#D29A68")
+BOX_BG = QColor("#1F3A12")
+BOX_BORDER = QColor("#14240B")
+TEXT_WORK = QColor("#EEF4B4")
+TEXT_BREAK = QColor("#8FE3F0")
+ICON_WORK = QColor("#1F3A12")
+ICON_BREAK = QColor("#1D6A7A")
 
-# Fuente 5x7: cada carácter son 7 filas de 5 bits
+# Fuente 5x7: cada carácter son 7 filas de bits
 FONT = {
     "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
     "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
@@ -45,7 +50,7 @@ FONT = {
     "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
     ":": ["0", "1", "1", "0", "1", "1", "0"],
 }
-ICON_PLAY = ["10000", "11000", "11100", "11110", "11100", "11000", "10000"]
+ICON_PLAY = ["1000", "1100", "1110", "1111", "1110", "1100", "1000"]
 ICON_PAUSE = ["11011", "11011", "11011", "11011", "11011", "11011", "11011"]
 
 
@@ -59,9 +64,19 @@ class Geometry:
         return QRectF(4, 4, self.width - 8, self.height - 8)
 
     @property
+    def grid(self):
+        """(columnas, filas, desplazamiento x, desplazamiento y) de la rejilla."""
+        cols, rows = int(self.width) // PIXEL, int(self.height) // PIXEL
+        return cols, rows, (self.width - cols * PIXEL) / 2, (self.height - rows * PIXEL) / 2
+
+    @property
     def pit_center(self) -> QPointF:
+        """Centro del hueso, ajustado a una esquina de celda para que sea simétrico."""
+        cols, rows, ox, oy = self.grid
         r = self.avocado_rect
-        return QPointF(r.center().x(), r.top() + r.height() * 0.66)
+        cx = ox + round((r.center().x() - ox) / PIXEL) * PIXEL
+        cy = oy + round((r.top() + r.height() * 0.66 - oy) / PIXEL) * PIXEL
+        return QPointF(cx, cy)
 
     @property
     def pit_radius(self) -> float:
@@ -101,64 +116,104 @@ def flesh_path(skin: QPainterPath, r: QRectF) -> QPainterPath:
     return t.map(skin)
 
 
-# ---- cuerpo pixelado (se calcula una vez por tamaño y se guarda) -------------
-_body_cache: dict = {}
+# ---- elementos precalculados (una vez por tamaño de ventana) -----------------
+@dataclass
+class _Cache:
+    body: QImage
+    cavity: QImage
+    pit_cells: list = field(default_factory=list)   # (ángulo, QRectF, QColor)
 
 
-def _body_image(g: Geometry) -> QImage:
+_cache: dict = {}
+
+
+def _build(g: Geometry) -> _Cache:
     key = (int(g.width), int(g.height))
-    if key in _body_cache:
-        return _body_cache[key]
+    if key in _cache:
+        return _cache[key]
 
     r = g.avocado_rect
-    skin, flesh = skin_path(r), flesh_path(skin_path(r), r)
-    cols, rows = int(g.width) // PIXEL, int(g.height) // PIXEL
-    off_x = (g.width - cols * PIXEL) / 2
-    off_y = (g.height - rows * PIXEL) / 2
+    skin = skin_path(r)
+    flesh = flesh_path(skin, r)
+    cols, rows, ox, oy = g.grid
+    pc, pr = g.pit_center, g.pit_radius
 
     def center(c, rw):
-        return QPointF(off_x + (c + 0.5) * PIXEL, off_y + (rw + 0.5) * PIXEL)
+        return QPointF(ox + (c + 0.5) * PIXEL, oy + (rw + 0.5) * PIXEL)
+
+    def cell(c, rw):
+        return QRectF(ox + c * PIXEL, oy + rw * PIXEL, PIXEL, PIXEL)
+
+    def in_pit(c, rw):
+        pt = center(c, rw)
+        return math.hypot(pt.x() - pc.x(), pt.y() - pc.y()) <= pr
 
     in_skin = [[skin.contains(center(c, rw)) for c in range(cols)] for rw in range(rows)]
     in_flesh = [[flesh.contains(center(c, rw)) for c in range(cols)] for rw in range(rows)]
 
-    def is_skin(c, rw):
-        return 0 <= c < cols and 0 <= rw < rows and in_skin[rw][c]
+    def get(grid, c, rw):
+        return 0 <= c < cols and 0 <= rw < rows and grid[rw][c]
 
-    def is_flesh(c, rw):
-        return 0 <= c < cols and 0 <= rw < rows and in_flesh[rw][c]
+    def neigh(c, rw):
+        return [(c + 1, rw), (c - 1, rw), (c, rw + 1), (c, rw - 1)]
 
-    pc, pr = g.pit_center, g.pit_radius
-    img = QImage(key[0], key[1], QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(Qt.GlobalColor.transparent)
-    p = QPainter(img)
+    # Cuerpo: cáscara y pulpa
+    body = QImage(key[0], key[1], QImage.Format.Format_ARGB32_Premultiplied)
+    body.fill(Qt.GlobalColor.transparent)
+    p = QPainter(body)
     for rw in range(rows):
         for c in range(cols):
             if not in_skin[rw][c]:
                 continue
-            neigh = [(c + 1, rw), (c - 1, rw), (c, rw + 1), (c, rw - 1)]
-            if not all(is_skin(*n) for n in neigh):
+            if not all(get(in_skin, *n) for n in neigh(c, rw)):
                 color = OUTLINE
             elif not in_flesh[rw][c]:
-                # brillo en la cáscara del lado izquierdo-superior
                 color = SKIN_SHINE if (c < cols * 0.32 and rw < rows * 0.6) else SKIN
-            elif not all(is_flesh(*n) for n in neigh):
+            elif not all(get(in_flesh, *n) for n in neigh(c, rw)):
                 color = FLESH_RIM
             else:
                 pt = center(c, rw)
                 d = math.hypot(pt.x() - pc.x(), pt.y() - pc.y()) / pr
                 color = FLESH_3 if d < 1.45 else FLESH_2 if d < 2.1 else FLESH_1
-            p.fillRect(QRectF(off_x + c * PIXEL, off_y + rw * PIXEL, PIXEL, PIXEL), color)
+            p.fillRect(cell(c, rw), color)
     p.end()
-    _body_cache[key] = img
-    return img
+
+    # Hueco del hueso (lo que se ve cuando el barrido lo borra)
+    cavity = QImage(key[0], key[1], QImage.Format.Format_ARGB32_Premultiplied)
+    cavity.fill(Qt.GlobalColor.transparent)
+    p = QPainter(cavity)
+    pit_cells = []
+    for rw in range(rows):
+        for c in range(cols):
+            if not in_pit(c, rw):
+                continue
+            edge = not all(in_pit(*n) for n in neigh(c, rw))
+            p.fillRect(cell(c, rw), CAVITY_RIM if edge else CAVITY)
+
+            # Color del hueso: luz desde arriba a la izquierda
+            pt = center(c, rw)
+            dx, dy = (pt.x() - pc.x()) / pr, (pt.y() - pc.y()) / pr
+            light = -(dx + dy) / math.sqrt(2)          # 1 = arriba-izquierda
+            if edge:
+                color = PIT_OUTLINE
+            elif -0.62 < dx < -0.28 and -0.62 < dy < -0.28:
+                color = PIT_SHINE
+            elif light > 0.25:
+                color = PIT_LIGHT
+            elif light > -0.35:
+                color = PIT_MID
+            else:
+                color = PIT_DARK
+            # ángulo en sentido horario desde las 12 (0–360)
+            angle = math.degrees(math.atan2(pt.x() - pc.x(), -(pt.y() - pc.y()))) % 360
+            pit_cells.append((angle, cell(c, rw), color))
+    p.end()
+
+    _cache[key] = _Cache(body, cavity, pit_cells)
+    return _cache[key]
 
 
 # ---- texto en píxeles ---------------------------------------------------------
-def _glyph_width(ch: str) -> int:
-    return len(FONT[ch][0])
-
-
 def _draw_bitmap(p: QPainter, rows, x: float, y: float, px: float, color: QColor):
     for j, row in enumerate(rows):
         for i, bit in enumerate(row):
@@ -166,14 +221,20 @@ def _draw_bitmap(p: QPainter, rows, x: float, y: float, px: float, color: QColor
                 p.fillRect(QRectF(x + i * px, y + j * px, px, px), color)
 
 
-def _draw_pixel_text(p: QPainter, text: str, cx: float, top: float, color: QColor):
-    px = FONT_PIXEL
-    width = sum(_glyph_width(ch) + 1 for ch in text) - 1
-    x = cx - width * px / 2
-    for ch in text:
-        _draw_bitmap(p, FONT[ch], x + 1, top + 1, px, TEXT_SHADOW)   # sombra clara
-        _draw_bitmap(p, FONT[ch], x, top, px, color)
-        x += (_glyph_width(ch) + 1) * px
+def _text_width(text: str) -> int:
+    """Ancho en píxeles de fuente (1 columna de separación entre caracteres)."""
+    return sum(len(FONT[ch][0]) + 1 for ch in text) - 1
+
+
+def _draw_box(p: QPainter, rect: QRectF, px: float):
+    """Recuadro pixelado: borde de 1 px y esquinas recortadas en escalón."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    # borde (rectángulo exterior sin las esquinas)
+    p.fillRect(QRectF(x + px, y, w - 2 * px, h), BOX_BORDER)
+    p.fillRect(QRectF(x, y + px, w, h - 2 * px), BOX_BORDER)
+    # relleno
+    p.fillRect(QRectF(x + 2 * px, y + px, w - 4 * px, h - 2 * px), BOX_BG)
+    p.fillRect(QRectF(x + px, y + 2 * px, w - 2 * px, h - 4 * px), BOX_BG)
 
 
 def fmt_time(seconds: float) -> str:
@@ -185,40 +246,35 @@ def fmt_time(seconds: float) -> str:
 def draw(p: QPainter, g: Geometry, *, remaining: float, fraction: float,
          is_break: bool, icon: str | None, show_time: bool = True):
     """icon: "play", "pause" o None."""
-    p.drawImage(0, 0, _body_image(g))
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    c = _build(g)
+    p.drawImage(0, 0, c.body)
+    p.drawImage(0, 0, c.cavity)
 
-    # Hueco donde va el hueso (se ve cuando el barrido lo va borrando)
-    pc, pr = g.pit_center, g.pit_radius
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(CAVITY)
-    p.drawEllipse(pc, pr + 3, pr + 3)
-
-    # Hueso: solo la parte que queda. El barrido empieza a las 12 y avanza
-    # en sentido horario; queda el sector que va del borde del barrido a las 12.
+    # Hueso: quedan las celdas cuyo ángulo ya ha pasado el barrido
+    swept = 360.0 * (1.0 - fraction)
     if fraction > 0:
-        rect = QRectF(pc.x() - pr, pc.y() - pr, 2 * pr, 2 * pr)
-        swept = 360.0 * (1.0 - fraction)
-        sector = QPainterPath(pc)
-        sector.arcTo(rect, 90.0 - swept, -360.0 * fraction)   # Qt: negativo = horario
-        sector.closeSubpath()
-        p.save()
-        p.setClipPath(sector)
-        grad = QRadialGradient(pc.x() - pr * 0.35, pc.y() - pr * 0.35, pr * 1.3)
-        grad.setColorAt(0, PIT_LIGHT)
-        grad.setColorAt(1, PIT_DARK)
-        p.setBrush(QBrush(grad))
-        p.drawEllipse(pc, pr, pr)
-        p.setBrush(QColor(255, 255, 255, 60))
-        p.drawEllipse(QPointF(pc.x() - pr * 0.35, pc.y() - pr * 0.4), pr * 0.22, pr * 0.15)
-        p.restore()
+        for angle, rect, color in c.pit_cells:
+            if angle >= swept:
+                p.fillRect(rect, color)
 
-    # Contador y estado, dentro de la pulpa
-    color = TEXT_BREAK if is_break else TEXT_WORK
-    top = g.text_top
+    # Recuadro del contador
+    px = FONT_PIXEL
+    text = fmt_time(remaining)
+    tw, th = _text_width(text) * px, 7 * px
+    pad = 3 * px
+    box = QRectF(round(g.width / 2 - tw / 2 - pad), round(g.text_top - pad),
+                 tw + 2 * pad, th + 2 * pad)
+    _draw_box(p, box, px)
     if show_time:
-        _draw_pixel_text(p, fmt_time(remaining), g.width / 2, top, color)
+        x = box.x() + pad
+        for ch in text:
+            _draw_bitmap(p, FONT[ch], x, box.y() + pad, px,
+                         TEXT_BREAK if is_break else TEXT_WORK)
+            x += (len(FONT[ch][0]) + 1) * px
+
+    # Icono de estado debajo del recuadro
     bitmap = {"play": ICON_PLAY, "pause": ICON_PAUSE}.get(icon)
     if bitmap:
-        px = 3
-        _draw_bitmap(p, bitmap, g.width / 2 - 2.5 * px, top + 9 * FONT_PIXEL, px, color)
+        w = len(bitmap[0]) * px
+        _draw_bitmap(p, bitmap, round(g.width / 2 - w / 2), box.bottom() + 2 * px, px,
+                     ICON_BREAK if is_break else ICON_WORK)
