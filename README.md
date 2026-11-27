@@ -43,7 +43,7 @@ aparece el aguacate.
 |---|---|
 | Clic en el aguacate | Iniciar / pausar. Durante la alarma: la para y empieza el descanso. |
 | Arrastrar el aguacate | Moverlo por la pantalla. |
-| Clic derecho | Menú: minutos de trabajo y descanso, reiniciar, siempre encima, salir. Con `--demo` los «minutos» son segundos. |
+| Clic derecho | Menú: minutos de trabajo y descanso, estado del bloqueo, reiniciar, siempre encima, Ajustes…, abrir config.json, salir. Con `--demo` los «minutos» son segundos y no se guardan. |
 
 - El hueso desaparece con un barrido en sentido horario a medida que pasa el tiempo.
 - El contador está dentro del aguacate: verde = trabajo, azul = descanso.
@@ -53,6 +53,48 @@ aparece el aguacate.
   «Siempre encima» en el menú.
 - Al acabar el trabajo: «ding-dong» suave repetido y vibración hasta que hagas clic.
 - Al acabar el descanso: un sonido suave; el siguiente trabajo empieza con un clic.
+
+## Ajustes y config.json
+Clic derecho → **Ajustes…** para cambiar tiempos, volumen, tono, vibración, «siempre
+encima» y la lista de webs bloqueadas. El botón «▶ Probar sonido» toca la alarma con los
+valores que estés eligiendo.
+
+Todo se guarda en `%APPDATA%\Aguacate\config.json` (clic derecho → **Abrir config.json**
+lo abre en el Bloc de notas). Si lo editas a mano con la app abierta, los cambios se
+aplican al guardar el archivo. Si escribes algo mal, la app te avisa y sigue con lo que
+tenía; cada valor incorrecto se sustituye por el de por defecto sin perder el resto.
+
+| Clave | Por defecto | Valores |
+|---|---|---|
+| `work_minutes` | 25 | 1–180 |
+| `break_minutes` | 5 | 1–60 |
+| `always_on_top` | false | true / false |
+| `volume` | 0.45 | 0.0–1.0 |
+| `beep_ms` | 300 | 100–1000 (ms de cada nota) |
+| `beep_frequency` | 523 | 200–2000 (Hz; más bajo = más grave) |
+| `vibration` | true | true / false |
+| `position` | null | [x, y] de la ventana; se guarda al arrastrarla |
+| `blocked_domains` | youtube.com, … | lista de dominios: `["youtube.com", "www.youtube.com"]` |
+
+Los dominios que no sean válidos (con espacios, `http://`, barras…) se ignoran y se avisa.
+
+## Crear el .exe
+Desde la carpeta del proyecto, en PowerShell:
+
+```powershell
+cd C:\proyectos-claude\aguacate-pomodoro-vibecoded
+.\build.ps1
+```
+
+El script instala PyInstaller, pasa los tests, genera el icono y crea
+`dist\AguacatePomodoro.exe` (un solo archivo, ~50–70 MB, no necesita Python instalado).
+Puedes copiarlo donde quieras y crear un acceso directo (clic derecho → Mostrar más
+opciones → Enviar a → Escritorio).
+
+- Cada arranque tarda 2–4 s: el .exe se descomprime en una carpeta temporal y, al pedir
+  permisos, se lanza dos veces (la primera solo para pedir el UAC).
+- Las mismas opciones funcionan con el .exe: `AguacatePomodoro.exe --demo`,
+  `--sin-admin`, `--desbloquear`.
 
 ## Actualizar a la última versión
 
@@ -104,19 +146,23 @@ al empezar el descanso, al reiniciar y al salir. Después de cada cambio se ejec
   Seguridad; Firefox: Configuración → Privacidad → DNS sobre HTTPS).
 - **Sin comodines:** bloquear `youtube.com` no bloquea `music.youtube.com`. Cada subdominio
   hay que añadirlo a la lista.
-- **Antivirus:** Microsoft Defender puede avisar al modificar el hosts.
+- **Antivirus:** Microsoft Defender puede avisar al modificar el hosts o al ejecutar el
+  .exe (no está firmado digitalmente).
 
 ## Desbloquear webs a mano
 Si algo falla y alguna web se queda bloqueada, usa cualquiera de estas tres opciones
 (de la más fácil a la más manual):
 
-**1. Con la propia app** (pedirá permiso de administrador):
+**1. Con la propia app** (pedirá permiso de administrador y mostrará un aviso con el
+resultado):
 
 ```powershell
 cd C:\proyectos-claude\aguacate-pomodoro-vibecoded
 .\.venv\Scripts\Activate.ps1
 python main.py --desbloquear
 ```
+
+o, con el .exe: `.\dist\AguacatePomodoro.exe --desbloquear`
 
 **2. Con el Bloc de notas:**
 1. Menú Inicio → escribe «Bloc de notas» → clic derecho → **Ejecutar como administrador**.

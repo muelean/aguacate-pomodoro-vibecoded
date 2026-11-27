@@ -48,27 +48,32 @@ def make_hosts():
     return HostsFile(), admin.is_admin()
 
 
+def message(text: str, error: bool = False):
+    """Ventana de aviso de Windows (sirve también sin consola, en el .exe)."""
+    print(text)
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(None, text, TITLE, 0x10 if error else 0x40)
+
+
 def run_unblock_only() -> int:
     """--desbloquear: limpia el hosts y sale, sin abrir el aguacate."""
     hosts, can_write = make_hosts()
     if hosts is None:
-        print("El bloqueo solo existe en Windows.")
+        message("El bloqueo solo existe en Windows.")
         return 0
     if not can_write:
-        if admin.ELEVATED_FLAG not in sys.argv and admin.relaunch_as_admin(console=True):
+        if admin.ELEVATED_FLAG not in sys.argv and admin.relaunch_as_admin():
             return 0
-        print("Hacen falta permisos de administrador. " + MANUAL_HELP)
+        message("Hacen falta permisos de administrador. " + MANUAL_HELP, error=True)
         return 1
     try:
         removed = hosts.unblock()
     except HostsError as e:
-        print(f"Error: {e}\n{MANUAL_HELP}")
-        input("Pulsa Intro para cerrar…") if admin.ELEVATED_FLAG in sys.argv else None
+        message(f"Error: {e}\n{MANUAL_HELP}", error=True)
         return 1
-    msg = "Bloqueo quitado." if removed else "No había ningún bloqueo. Nada que hacer."
-    print(msg)
-    if admin.ELEVATED_FLAG in sys.argv:          # ventana nueva: que dé tiempo a leerlo
-        input("Pulsa Intro para cerrar…")
+    message("Bloqueo quitado. Las webs vuelven a funcionar." if removed
+            else "No había ningún bloqueo. Nada que hacer.")
     return 0
 
 
@@ -93,6 +98,12 @@ def main() -> int:
 
     app = QApplication(argv)
     app.setApplicationName(TITLE)
+    from aguacate import painter
+    app.setWindowIcon(painter.app_icon())
+    if sys.platform == "win32":
+        # para que la barra de tareas use el icono del aguacate y no el de Python
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Aguacate.Pomodoro")
 
     # 2) Solo un aguacate a la vez (dos copias se pelearían por el hosts)
     lock = QLockFile(os.path.join(tempfile.gettempdir(), "aguacate-pomodoro.lock"))
@@ -130,14 +141,12 @@ def main() -> int:
                        "El aguacate funciona como temporizador normal.")
         hosts = None
 
-    cfg = config.load()
-    demo = "--demo" in argv
-    if demo:
-        cfg["work_minutes"], cfg["break_minutes"] = 10, 5
+    cfg, problems = config.load()
+    notices = problems + notices
 
-    win = AvocadoWindow(cfg, demo=demo, hosts=hosts)
+    win = AvocadoWindow(cfg, demo="--demo" in argv, hosts=hosts)
     win.show()
-    win.place_bottom_right()
+    win.restore_position()
     for n in notices:
         QMessageBox.warning(win, TITLE, n)
 

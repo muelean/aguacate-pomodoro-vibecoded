@@ -285,3 +285,34 @@ def draw(p: QPainter, g: Geometry, *, remaining: float, fraction: float,
         # el candado abierto tiene una fila más (el arco levantado): subirlo 1 px de fuente
         top = box.bottom() + 2 * px - (len(bitmap) - 7) * px
         _draw_bitmap(p, bitmap, round(g.width / 2 - w / 2), top, px, color)
+
+
+# ---- icono de la app (ventana, barra de tareas y .exe) ------------------------
+def icon_image(size: int) -> QImage:
+    """El aguacate (sin contador) centrado en un cuadrado transparente."""
+    g = Geometry(224, 296)
+    c = _build(g)
+    src = QImage(224, 296, QImage.Format.Format_ARGB32_Premultiplied)
+    src.fill(Qt.GlobalColor.transparent)
+    p = QPainter(src)
+    p.drawImage(0, 0, c.body)
+    for _angle, rect, color in c.pit_cells:
+        p.fillRect(rect, color)
+    p.end()
+    scaled = src.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation if size < 64
+                        else Qt.TransformationMode.FastTransformation)
+    out = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.drawImage((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+    p.end()
+    return out
+
+
+def app_icon():
+    from PySide6.QtGui import QIcon, QPixmap
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        icon.addPixmap(QPixmap.fromImage(icon_image(size)))
+    return icon

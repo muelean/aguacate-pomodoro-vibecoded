@@ -1,12 +1,15 @@
 """Ventana del aguacate: sin bordes, transparente, arrastrable, con menú."""
+import os
 import random
+import subprocess
+import sys
 import time
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QPainter
+from PySide6.QtCore import QFileSystemWatcher, QPoint, QPointF, Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup, QGuiApplication, QPainter
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QWidget
 
-from . import painter
+from . import config, painter
 from .beeper import Beeper
 from .blocker import HostsError
 from .timer import (
@@ -17,25 +20,25 @@ from .timer import (
 DRAG_THRESHOLD = 5          # px: menos que esto es un clic, no un arrastre
 WORK_OPTIONS = [15, 20, 25, 30, 45, 50, 60]
 BREAK_OPTIONS = [3, 5, 10, 15]
+DEMO_SECONDS = (10, 5)      # trabajo / descanso en modo demo
 
 
 class AvocadoWindow(QWidget):
-    def __init__(self, cfg: dict, demo: bool = False, hosts=None):
+    def __init__(self, cfg: dict, demo: bool = False, hosts=None, cfg_path=None):
         super().__init__()
         self.cfg = cfg
+        self.cfg_path = cfg_path or config.config_path()
+        self._save_error_shown = False
         self.hosts = hosts          # HostsFile o None si el bloqueo está desactivado
         self._blocked = False
         self._block_error = None
         self.demo = demo
-        unit = 1 if demo else 60    # en modo demo los "minutos" son segundos
-        self._unit = unit
-        self.pomo = Pomodoro(cfg["work_minutes"] * unit, cfg["break_minutes"] * unit)
+        # En modo demo los tiempos son segundos y NO se guardan en config.json
+        self._demo = list(DEMO_SECONDS)
+        self.pomo = Pomodoro(*self._durations())
 
         self.beeper = Beeper(self)
-        self.beeper.volume = cfg["volume"]
-        self.beeper.beep_ms = cfg["beep_ms"]
-        self.beeper.frequency = cfg["beep_frequency"]
-        self.beeper.prepare()
+        self._apply_sound(cfg)
 
         self.setWindowTitle("Aguacate Pomodoro")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -57,6 +60,93 @@ class AvocadoWindow(QWidget):
         self._press_win = None
         self._dragging = False
         self._temp_on_top = False   # encima temporalmente porque ha acabado un tiempo
+
+        # Recargar config.json si se edita a mano (p. ej. con el Bloc de notas)
+        self._watcher = QFileSystemWatcher(self)
+        self._watch_config()
+        self._watcher.fileChanged.connect(lambda _: QTimer.singleShot(300, self.reload_config))
+        self._watcher.directoryChanged.connect(lambda _: self._watch_config())
+
+        self.setWindowIcon(painter.app_icon())
+
+    # ---- configuración -------------------------------------------------------
+    def _durations(self):
+        if self.demo:
+            return self._demo[0], self._demo[1]
+        return self.cfg["work_minutes"] * 60, self.cfg["break_minutes"] * 60
+
+    def _apply_sound(self, cfg):
+        self.beeper.volume = cfg["volume"]
+        self.beeper.beep_ms = cfg["beep_ms"]
+        self.beeper.frequency = cfg["beep_frequency"]
+        self.beeper.prepare()
+
+    def _watch_config(self):
+        folder = os.path.dirname(self.cfg_path)
+        if os.path.isdir(folder) and folder not in self._watcher.directories():
+            self._watcher.addPath(folder)
+        if os.path.exists(self.cfg_path) and self.cfg_path not in self._watcher.files():
+            self._watcher.addPath(self.cfg_path)
+            QTimer.singleShot(300, self.reload_config)   # el Bloc de notas reemplaza el archivo
+
+    def save_config(self):
+        try:
+            config.save(self.cfg, self.cfg_path)
+        except OSError as e:
+            if not self._save_error_shown:
+                self._save_error_shown = True
+                QMessageBox.warning(self, "Aguacate", f"No puedo guardar la configuración:\n{e}")
+
+    def reload_config(self):
+        new, problems = config.load(self.cfg_path, fallback=self.cfg)
+        if problems:
+            QMessageBox.warning(self, "Aguacate", "\n\n".join(problems))
+        if new != self.cfg:
+            self.apply_config(new)
+
+    def apply_config(self, new: dict):
+        """Aplica una configuración nueva sin reiniciar la app."""
+        old, self.cfg = self.cfg, new
+        if not self.demo:
+            self.pomo.set_durations(*self._durations())
+        if any(old[k] != new[k] for k in ("volume", "beep_ms", "beep_frequency")):
+            self._apply_sound(new)
+        if old["always_on_top"] != new["always_on_top"]:
+            self._temp_on_top = False
+            self._set_on_top_keep_pos(new["always_on_top"])
+        if old["blocked_domains"] != new["blocked_domains"] and self._blocked:
+            try:
+                self.hosts.block(new["blocked_domains"])     # sustituye el bloque
+            except HostsError as e:
+                QMessageBox.warning(self, "Aguacate", str(e))
+        self.update()
+
+    def open_config_file(self):
+        self.save_config()
+        if sys.platform == "win32":
+            subprocess.Popen(["notepad.exe", self.cfg_path])
+        else:
+            QMessageBox.information(self, "Aguacate", self.cfg_path)
+
+    def _open_settings(self):
+        from .settings import SettingsDialog
+        dlg = SettingsDialog(self.cfg, self.beeper, self.open_config_file, demo=self.demo,
+                             parent=self)
+        if dlg.exec() and dlg.result_cfg is not None:
+            new = dlg.result_cfg
+            new["position"] = self.cfg.get("position")
+            self.apply_config(new)
+            self.save_config()
+
+    def restore_position(self):
+        pos = self.cfg.get("position")
+        if pos:
+            p = QPoint(*pos)
+            center = p + QPoint(self.width() // 2, self.height() // 2)
+            if QGuiApplication.screenAt(center) is not None:   # sigue en una pantalla
+                self.move(p)
+                return
+        self.place_bottom_right()
 
     # ---- ventana -------------------------------------------------------------
     def _apply_flags(self, on_top: bool):
@@ -179,18 +269,22 @@ class AvocadoWindow(QWidget):
         if e.button() == Qt.MouseButton.LeftButton and self._press_global is not None:
             if not self._dragging:
                 self._on_avocado_click()
+            else:
+                pos = self._shake_base if self._shake.isActive() else self.pos()
+                self.cfg["position"] = [pos.x(), pos.y()]
+                self.save_config()
             self._press_global = None
             self._dragging = False
 
     # ---- menú contextual ----------------------------------------------------
     def contextMenuEvent(self, e):
         m = QMenu(self)
-        u = "s" if self.demo else "min"
+        u = "s, demo" if self.demo else "min"
+        work, brk = (self._demo if self.demo
+                     else (self.cfg["work_minutes"], self.cfg["break_minutes"]))
 
-        m.addMenu(self._minutes_menu(m, f"Trabajo ({u})", WORK_OPTIONS,
-                                     self.cfg["work_minutes"], self._set_work))
-        m.addMenu(self._minutes_menu(m, f"Descanso ({u})", BREAK_OPTIONS,
-                                     self.cfg["break_minutes"], self._set_break))
+        m.addMenu(self._minutes_menu(m, f"Trabajo ({u})", WORK_OPTIONS, work, self._set_work))
+        m.addMenu(self._minutes_menu(m, f"Descanso ({u})", BREAK_OPTIONS, brk, self._set_break))
         m.addSeparator()
 
         status = m.addAction(self._block_status())
@@ -205,8 +299,10 @@ class AvocadoWindow(QWidget):
         top.setChecked(self.cfg["always_on_top"])
         top.toggled.connect(self._toggle_on_top)
 
-        settings = m.addAction("Ajustes… (Fase 3)")
-        settings.setEnabled(False)
+        settings = m.addAction("Ajustes…")
+        settings.triggered.connect(self._open_settings)
+        open_json = m.addAction("Abrir config.json")
+        open_json.triggered.connect(self.open_config_file)
 
         m.addSeparator()
         quit_ = m.addAction("Salir")
@@ -233,14 +329,22 @@ class AvocadoWindow(QWidget):
             setter(v)
 
     def _set_work(self, v):
-        self.cfg["work_minutes"] = v
-        self.pomo.set_durations(work_seconds=v * self._unit)
+        if self.demo:
+            self._demo[0] = v
+        else:
+            self.cfg["work_minutes"] = v
+            self.save_config()
+        self.pomo.set_durations(work_seconds=self._durations()[0])
         self._note_if_pending(self.pomo.phase != BREAK)
         self.update()
 
     def _set_break(self, v):
-        self.cfg["break_minutes"] = v
-        self.pomo.set_durations(break_seconds=v * self._unit)
+        if self.demo:
+            self._demo[1] = v
+        else:
+            self.cfg["break_minutes"] = v
+            self.save_config()
+        self.pomo.set_durations(break_seconds=self._durations()[1])
         self._note_if_pending(self.pomo.phase == BREAK)
         self.update()
 
@@ -272,6 +376,7 @@ class AvocadoWindow(QWidget):
         self.cfg["always_on_top"] = on
         self._temp_on_top = False
         self._set_on_top_keep_pos(on)
+        self.save_config()
 
     # ---- bloqueo de webs -----------------------------------------------------
     def _sync_block(self):

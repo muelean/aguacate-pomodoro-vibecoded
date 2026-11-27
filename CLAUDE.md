@@ -8,9 +8,9 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 - Python 3.14.5 (en el PC del usuario) + PySide6 6.12.0.
 - Sonido generado por código (síntesis PCM) y guardado como WAV en `%TEMP%\aguacate\` al arrancar.
   En Windows se reproduce con `winsound` (PlaySound, bucle con SND_LOOP); fuera de Windows (solo desarrollo) con QSoundEffect.
-- Empaquetado a `.exe` con PyInstaller (Fase 3).
-- Configuración en `%APPDATA%\Aguacate\config.json` (Fase 3).
-- Entorno virtual `.venv` + `requirements.txt`. Tests con `unittest` (sin dependencias extra).
+- Empaquetado a `.exe` con PyInstaller 6.22.3 (`build.ps1`, `--onefile --windowed`, excluye QtMultimedia/QtNetwork/QtQml/QtQuick). Icono `.ico` generado por código (`tools/make_icon.py`, PNG multi-tamaño 16–256).
+- Configuración en `%APPDATA%\Aguacate\config.json`.
+- Entorno virtual `.venv` + `requirements.txt` (app) + `requirements-dev.txt` (PyInstaller). Tests con `unittest` (sin dependencias extra).
 
 ## Cómo se trabaja
 - El usuario tiene poca experiencia con vibe coding: explicar cada paso brevemente.
@@ -41,6 +41,10 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 | Limpieza al salir | `closeEvent`, `aboutToQuit`, `commitDataRequest` (apagado/cierre de sesión), `atexit`, SIGINT/SIGBREAK. Kill duro → limpieza al siguiente arranque con aviso. |
 | Una sola instancia | `QLockFile` en `%TEMP%` (dos copias se pelearían por el hosts). |
 | Opciones | `--demo`, `--sin-admin`, `--desbloquear` (limpia y sale). Desarrollo: `AGUACATE_HOSTS=ruta` usa un hosts falso. |
+| config.json | Se crea con valores por defecto si no existe. Cada clave se valida por separado (`config.validate`, rangos en `RANGES`); lo inválido vuelve al valor por defecto con aviso. JSON roto al arrancar → valores por defecto sin sobrescribir el archivo; al recargar en caliente → se mantiene la config actual. Guardado atómico. Se guarda al cambiar minutos, «siempre encima», posición (al soltar tras arrastrar) y desde Ajustes. `QFileSystemWatcher` recarga al editar a mano (vigila archivo y carpeta porque el Bloc de notas reemplaza el archivo). |
+| Ajustes | `aguacate/settings.py` (QDialog): minutos, volumen (slider), duración de nota, tono, «Probar sonido», vibración, siempre encima, lista de dominios (una por línea), botón «Abrir config.json» (Bloc de notas). Cambiar dominios con el bloqueo activo reescribe el bloque al momento. |
+| Demo y config | En `--demo` los tiempos (10/5 s) viven solo en memoria y no se guardan; el resto de ajustes sí. |
+| --desbloquear | Muestra el resultado con `MessageBoxW` (funciona en el .exe sin consola). |
 | Modo demo | `python main.py --demo` = 10 s trabajo / 5 s descanso, para probar rápido. |
 
 ## Estructura
@@ -51,13 +55,16 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 - `aguacate/window.py` – ventana, ratón, menú, vibración.
 - `aguacate/blocker.py` – hosts: marcas, copia de seguridad, escritura atómica, flushdns.
 - `aguacate/admin.py` – comprobar permisos y relanzar con UAC.
-- `aguacate/config.py` – valores por defecto (en Fase 3, lectura/escritura de config.json).
+- `aguacate/config.py` – valores por defecto, validación, lectura/escritura de config.json.
+- `aguacate/settings.py` – ventana de Ajustes.
+- `tools/make_icon.py` – genera `build/aguacate.ico`.
+- `build.ps1` – tests + icono + PyInstaller → `dist/AguacatePomodoro.exe`.
 - `tests/` – tests con `python -m unittest`.
 
 ## Estado
 - [x] Fase 1: ventana + temporizador + pitido + vibración (probada por el usuario).
-- [x] Fase 2: bloqueo con hosts + recuperación (pendiente de prueba del usuario en Windows).
-- [ ] Fase 3: ajustes, config.json, .exe.
+- [x] Fase 2: bloqueo con hosts + recuperación (probada por el usuario).
+- [x] Fase 3: ajustes, config.json, .exe (pendiente de prueba del usuario en Windows).
 
 ## Limitaciones conocidas
 - DNS seguro (DoH) del navegador, VPN o proxy pueden saltarse hosts.

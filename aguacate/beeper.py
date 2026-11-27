@@ -112,6 +112,14 @@ class Beeper(QObject):
             for e in self._effects.values():
                 e.stop()
 
+    def preview(self, frequency: float, note_ms: int, volume: float):
+        """Toca una vez el «ding-dong» con estos ajustes (botón Probar de Ajustes)."""
+        self.stop()
+        path = os.path.join(self._dir, "prueba.wav")
+        write_wav(path, alarm_pattern(frequency, note_ms, volume))
+        self._effects.pop(path, None)
+        self._play(path, loop=False)
+
     def is_alarm_active(self) -> bool:
         return self._alarm_active
 
