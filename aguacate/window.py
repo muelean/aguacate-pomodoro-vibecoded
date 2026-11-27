@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QW
 
 from . import painter
 from .beeper import Beeper
+from .blocker import HostsError
 from .timer import (
     ALARM, BREAK, PAUSED, READY, RUNNING,
     EV_BREAK_DONE, EV_WORK_DONE, Pomodoro,
@@ -19,9 +20,12 @@ BREAK_OPTIONS = [3, 5, 10, 15]
 
 
 class AvocadoWindow(QWidget):
-    def __init__(self, cfg: dict, demo: bool = False):
+    def __init__(self, cfg: dict, demo: bool = False, hosts=None):
         super().__init__()
         self.cfg = cfg
+        self.hosts = hosts          # HostsFile o None si el bloqueo está desactivado
+        self._blocked = False
+        self._block_error = None
         self.demo = demo
         unit = 1 if demo else 60    # en modo demo los "minutos" son segundos
         self._unit = unit
@@ -70,6 +74,8 @@ class AvocadoWindow(QWidget):
 
     # ---- dibujo --------------------------------------------------------------
     def _icon(self):
+        if self._blocked:
+            return "lock"
         return {READY: "play", PAUSED: "pause"}.get(self.pomo.status)
 
     def paintEvent(self, _event):
@@ -101,6 +107,8 @@ class AvocadoWindow(QWidget):
         elif ev == EV_BREAK_DONE:
             self.beeper.soft_chime()
             self._bring_to_front()
+        if ev:
+            self._sync_block()
         self.update()
 
     def _on_avocado_click(self):
@@ -109,6 +117,7 @@ class AvocadoWindow(QWidget):
             self._stop_shake()
         self._end_temp_on_top()
         self.pomo.click()
+        self._sync_block()
         self.update()
 
     def _bring_to_front(self):
@@ -182,6 +191,10 @@ class AvocadoWindow(QWidget):
                                      self.cfg["break_minutes"], self._set_break))
         m.addSeparator()
 
+        status = m.addAction(self._block_status())
+        status.setEnabled(False)
+        m.addSeparator()
+
         reset = m.addAction("Reiniciar")
         reset.triggered.connect(self._reset)
 
@@ -240,6 +253,7 @@ class AvocadoWindow(QWidget):
         self._stop_shake()
         self._end_temp_on_top()
         self.pomo.reset()
+        self._sync_block()
         self.update()
 
     def _end_temp_on_top(self):
@@ -257,7 +271,46 @@ class AvocadoWindow(QWidget):
         self._temp_on_top = False
         self._set_on_top_keep_pos(on)
 
+    # ---- bloqueo de webs -----------------------------------------------------
+    def _sync_block(self):
+        """Bloquea solo mientras el trabajo está en marcha; si no, desbloquea."""
+        if self.hosts is None:
+            return
+        want = self.pomo.is_work_running()
+        if want == self._blocked:
+            return
+        try:
+            if want:
+                self.hosts.block(self.cfg["blocked_domains"])
+            else:
+                self.hosts.unblock()
+            self._blocked = want
+        except HostsError as e:
+            self._block_error = str(e)
+            self.release_block()
+            self.hosts = None
+            QMessageBox.warning(self, "Aguacate",
+                                f"{e}\n\nDesactivo el bloqueo; el temporizador sigue.")
+
+    def _block_status(self) -> str:
+        if self._block_error:
+            return "Bloqueo de webs: error (ver aviso)"
+        if self.hosts is None:
+            return "Bloqueo de webs: desactivado"
+        return "Bloqueo de webs: ACTIVO" if self._blocked else "Bloqueo de webs: en espera"
+
+    def release_block(self):
+        """Quita el bloqueo. Se llama al salir por cualquier vía; nunca lanza errores."""
+        if self.hosts is None:
+            return
+        try:
+            self.hosts.unblock()
+        except Exception:
+            pass
+        self._blocked = False
+
     def closeEvent(self, e):
         self.beeper.stop()
         self._stop_shake()
+        self.release_block()
         super().closeEvent(e)

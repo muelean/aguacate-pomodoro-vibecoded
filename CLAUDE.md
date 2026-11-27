@@ -36,6 +36,11 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 | Tiempo | Basado en `time.monotonic()` (no se desfasa aunque se retrasen los ticks). |
 | Permisos admin | Relanzarse con `ShellExecuteW "runas"` al arrancar; si se rechaza, funciona sin bloqueo (no usar `--uac-admin`). (Fase 2) |
 | Bloqueo | Bloque `# AGUACATE-START` / `# AGUACATE-END` en hosts, solo en trabajo en marcha; se quita al pausar, en descanso y al cerrar. Copia de seguridad única en `%APPDATA%\Aguacate\hosts.backup`. `ipconfig /flushdns` tras cada cambio. (Fase 2) |
+| Bloqueo: detalles | Además de `127.0.0.1` se añade `::1` por dominio (IPv6). Dominios validados con regex: lo que no sea un dominio válido se descarta (config.json no puede inyectar líneas). Escritura atómica (`.aguacate.tmp` + `os.replace`). Marcas rotas → `HostsCorrupt`, no se toca nada. Se respeta codificación (UTF-8/BOM/cp1252) y CRLF. El candado sustituye al icono mientras bloquea. Se bloquea solo en `phase == work and status == running` (la alarma ya no bloquea). |
+| Relanzado con permisos | `python main.py` → `ShellExecuteW runas` con **pythonw.exe** (sin consola que se pueda cerrar por error). `--elevado` evita bucles. Errores a `%TEMP%\aguacate\errores.log`. |
+| Limpieza al salir | `closeEvent`, `aboutToQuit`, `commitDataRequest` (apagado/cierre de sesión), `atexit`, SIGINT/SIGBREAK. Kill duro → limpieza al siguiente arranque con aviso. |
+| Una sola instancia | `QLockFile` en `%TEMP%` (dos copias se pelearían por el hosts). |
+| Opciones | `--demo`, `--sin-admin`, `--desbloquear` (limpia y sale). Desarrollo: `AGUACATE_HOSTS=ruta` usa un hosts falso. |
 | Modo demo | `python main.py --demo` = 10 s trabajo / 5 s descanso, para probar rápido. |
 
 ## Estructura
@@ -44,12 +49,14 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 - `aguacate/painter.py` – dibujo del aguacate.
 - `aguacate/beeper.py` – generación y reproducción de sonidos.
 - `aguacate/window.py` – ventana, ratón, menú, vibración.
+- `aguacate/blocker.py` – hosts: marcas, copia de seguridad, escritura atómica, flushdns.
+- `aguacate/admin.py` – comprobar permisos y relanzar con UAC.
 - `aguacate/config.py` – valores por defecto (en Fase 3, lectura/escritura de config.json).
 - `tests/` – tests con `python -m unittest`.
 
 ## Estado
-- [x] Fase 1: ventana + temporizador + pitido + vibración (pendiente de prueba del usuario).
-- [ ] Fase 2: bloqueo con hosts + recuperación.
+- [x] Fase 1: ventana + temporizador + pitido + vibración (probada por el usuario).
+- [x] Fase 2: bloqueo con hosts + recuperación (pendiente de prueba del usuario en Windows).
 - [ ] Fase 3: ajustes, config.json, .exe.
 
 ## Limitaciones conocidas
