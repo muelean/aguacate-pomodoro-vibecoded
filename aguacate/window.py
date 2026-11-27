@@ -1,9 +1,10 @@
 """Ventana del aguacate: sin bordes, transparente, arrastrable, con menú."""
 import random
+import time
 
 from PySide6.QtCore import QPoint, QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QPainter
-from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QWidget
 
 from . import painter
 from .beeper import Beeper
@@ -34,7 +35,7 @@ class AvocadoWindow(QWidget):
         self.setWindowTitle("Aguacate Pomodoro")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._apply_flags(cfg["always_on_top"])
-        self.resize(220, 300)
+        self.resize(224, 296)
 
         # Refresco del contador (5 veces por segundo)
         self._tick = QTimer(self)
@@ -66,25 +67,20 @@ class AvocadoWindow(QWidget):
         self.move(screen.right() - self.width() - 40, screen.bottom() - self.height() - 40)
 
     # ---- dibujo --------------------------------------------------------------
-    def _status_text(self) -> str:
-        phase = "DESCANSO" if self.pomo.phase == BREAK else "TRABAJO"
-        s = self.pomo.status
-        if s == READY:
-            return f"{phase} · clic para empezar"
-        if s == PAUSED:
-            return f"{phase} · en pausa"
-        if s == ALARM:
-            return "¡FIN! · clic para descansar"
-        return phase
+    def _icon(self):
+        return {READY: "play", PAUSED: "pause"}.get(self.pomo.status)
 
     def paintEvent(self, _event):
+        # En alarma el contador parpadea (medio segundo visible, medio oculto)
+        blink_off = self.pomo.status == ALARM and (time.monotonic() % 1.0) > 0.5
         p = QPainter(self)
         painter.draw(
             p, painter.Geometry(self.width(), self.height()),
             remaining=self.pomo.remaining(),
             fraction=self.pomo.fraction_left(),
             is_break=self.pomo.phase == BREAK,
-            status_text=self._status_text(),
+            icon=self._icon(),
+            show_time=not blink_off,
         )
         p.end()
 
@@ -97,6 +93,7 @@ class AvocadoWindow(QWidget):
         ev = self.pomo.tick()
         if ev == EV_WORK_DONE:
             self.beeper.start_alarm()
+            self._bring_to_front()
             if self.cfg["vibration"]:
                 self._start_shake()
         elif ev == EV_BREAK_DONE:
@@ -109,6 +106,15 @@ class AvocadoWindow(QWidget):
             self._stop_shake()
         self.pomo.click()
         self.update()
+
+    def _bring_to_front(self):
+        """Saca el aguacate por encima de otras ventanas al sonar la alarma.
+        Windows a veces impide robar el foco: en ese caso parpadea en la barra de tareas."""
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        QApplication.alert(self)
 
     # ---- vibración -----------------------------------------------------------
     def _start_shake(self):

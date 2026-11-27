@@ -25,13 +25,13 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 ## Decisiones tomadas
 | Tema | Decisión |
 |---|---|
-| Forma | Aguacate dibujado con QPainter (curvas Bézier), sin imágenes. |
-| Progreso | Anillo circular en la pulpa que se vacía + el hueso se encoge hasta desaparecer. |
-| Contador | MM:SS en una pastilla encima del aguacate, con el estado debajo. |
+| Forma | Aguacate en **pixel art** (silueta Bézier rasterizada en celdas de 8 px); el hueso es liso, no pixelado. Sin imágenes. |
+| Progreso | Sin anillo. El hueso se borra con un **barrido en sentido horario** desde las 12; queda el hueco de la pulpa. El hueso no se encoge. |
+| Contador | MM:SS **dentro de la pulpa**, encima del hueso, con fuente de píxeles 5x7 propia. Verde = trabajo, azul = descanso. Icono ▶ = listo, ❚❚ = pausa. Parpadea en alarma. |
 | Clic | Clic izquierdo en **cualquier parte del aguacate** = iniciar/pausar/parar alarma. Arrastrar (>5 px) mueve la ventana sin contar como clic. |
 | Fin del trabajo | Pitido repetido + vibración hasta clic. El clic para la alarma y **empieza el descanso**. |
 | Fin del descanso | Sonido corto y suave una vez. El siguiente trabajo **espera a un clic**. |
-| Siempre encima | Interruptor en el menú contextual. Activado por defecto. |
+| Siempre encima | Interruptor en el menú. **Desactivado por defecto** (otras ventanas lo tapan); al sonar la alarma el aguacate se trae al frente (`raise_` + `activateWindow` + `QApplication.alert`). |
 | Tiempo | Basado en `time.monotonic()` (no se desfasa aunque se retrasen los ticks). |
 | Permisos admin | Relanzarse con `ShellExecuteW "runas"` al arrancar; si se rechaza, funciona sin bloqueo (no usar `--uac-admin`). (Fase 2) |
 | Bloqueo | Bloque `# AGUACATE-START` / `# AGUACATE-END` en hosts, solo en trabajo en marcha; se quita al pausar, en descanso y al cerrar. Copia de seguridad única en `%APPDATA%\Aguacate\hosts.backup`. `ipconfig /flushdns` tras cada cambio. (Fase 2) |

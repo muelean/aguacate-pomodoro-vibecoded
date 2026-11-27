@@ -37,9 +37,13 @@ python main.py --demo   # pruebas: 10 s trabajo / 5 s descanso
 |---|---|
 | Clic en el aguacate | Iniciar / pausar. Durante la alarma: la para y empieza el descanso. |
 | Arrastrar el aguacate | Moverlo por la pantalla. |
-| Clic derecho | Menú: minutos de trabajo y descanso, reiniciar, siempre encima, salir. |
+| Clic derecho | Menú: minutos de trabajo y descanso, reiniciar, siempre encima, salir. Con `--demo` los «minutos» son segundos. |
 
-- El anillo verde (azul en el descanso) se vacía y el hueso se encoge con el tiempo.
+- El hueso desaparece con un barrido en sentido horario a medida que pasa el tiempo.
+- El contador está dentro del aguacate: verde = trabajo, azul = descanso.
+  ▶ = listo para empezar, ❚❚ = en pausa.
+- Por defecto otras ventanas pueden tapar el aguacate; al sonar la alarma sale al frente.
+  Si lo quieres siempre visible, activa «Siempre encima» en el menú.
 - Al acabar el trabajo: pitido repetido y vibración hasta que hagas clic.
 - Al acabar el descanso: un sonido suave; el siguiente trabajo empieza con un clic.
 

@@ -3,7 +3,7 @@
 DEFAULTS = {
     "work_minutes": 25,
     "break_minutes": 5,
-    "always_on_top": True,
+    "always_on_top": False,
     "volume": 0.6,            # 0.0 – 1.0
     "beep_ms": 250,           # duración de cada pitido
     "beep_frequency": 880,    # Hz
