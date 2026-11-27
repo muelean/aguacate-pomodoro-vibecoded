@@ -76,6 +76,8 @@ class AvocadoWindow(QWidget):
     def _icon(self):
         if self._blocked:
             return "lock"
+        if self.hosts is None and self.pomo.is_work_running():
+            return "unlock"          # trabajando, pero sin permisos no se bloquea nada
         return {READY: "play", PAUSED: "pause"}.get(self.pomo.status)
 
     def paintEvent(self, _event):

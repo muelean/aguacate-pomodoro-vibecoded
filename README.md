@@ -70,7 +70,7 @@ python -m unittest -v
 ```
 
 ## Bloqueo de webs
-Mientras el **trabajo está en marcha** (verás un candado bajo el contador), la app añade
+Mientras el **trabajo está en marcha** (verás un candado cerrado bajo el contador; si no diste permisos, el candado sale abierto y en naranja), la app añade
 al archivo `C:\Windows\System32\drivers\etc\hosts` un bloque como este:
 
 ```

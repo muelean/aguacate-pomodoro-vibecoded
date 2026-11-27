@@ -35,6 +35,7 @@ TEXT_WORK = QColor("#EEF4B4")
 TEXT_BREAK = QColor("#8FE3F0")
 ICON_WORK = QColor("#1F3A12")
 ICON_BREAK = QColor("#1D6A7A")
+ICON_WARN = QColor("#C0601A")     # candado abierto: el bloqueo no funciona
 
 # Fuente 5x7: cada carácter son 7 filas de bits
 FONT = {
@@ -53,6 +54,7 @@ FONT = {
 ICON_PLAY = ["1000", "1100", "1110", "1111", "1110", "1100", "1000"]
 ICON_PAUSE = ["11011", "11011", "11011", "11011", "11011", "11011", "11011"]
 ICON_LOCK = ["01110", "10001", "10001", "11111", "11011", "11011", "11111"]
+ICON_UNLOCK = ["01110", "10001", "10000", "10000", "11111", "11011", "11011", "11111"]
 
 
 @dataclass
@@ -246,7 +248,8 @@ def fmt_time(seconds: float) -> str:
 # ---- dibujo principal ---------------------------------------------------------
 def draw(p: QPainter, g: Geometry, *, remaining: float, fraction: float,
          is_break: bool, icon: str | None, show_time: bool = True):
-    """icon: "play", "pause", "lock" (webs bloqueadas) o None."""
+    """icon: "play", "pause", "lock" (webs bloqueadas), "unlock" (trabajando sin
+    bloqueo porque no hay permisos) o None."""
     c = _build(g)
     p.drawImage(0, 0, c.body)
     p.drawImage(0, 0, c.cavity)
@@ -274,8 +277,11 @@ def draw(p: QPainter, g: Geometry, *, remaining: float, fraction: float,
             x += (len(FONT[ch][0]) + 1) * px
 
     # Icono de estado debajo del recuadro
-    bitmap = {"play": ICON_PLAY, "pause": ICON_PAUSE, "lock": ICON_LOCK}.get(icon)
+    bitmap = {"play": ICON_PLAY, "pause": ICON_PAUSE, "lock": ICON_LOCK,
+              "unlock": ICON_UNLOCK}.get(icon)
     if bitmap:
         w = len(bitmap[0]) * px
-        _draw_bitmap(p, bitmap, round(g.width / 2 - w / 2), box.bottom() + 2 * px, px,
-                     ICON_BREAK if is_break else ICON_WORK)
+        color = ICON_WARN if icon == "unlock" else ICON_BREAK if is_break else ICON_WORK
+        # el candado abierto tiene una fila más (el arco levantado): subirlo 1 px de fuente
+        top = box.bottom() + 2 * px - (len(bitmap) - 7) * px
+        _draw_bitmap(p, bitmap, round(g.width / 2 - w / 2), top, px, color)
