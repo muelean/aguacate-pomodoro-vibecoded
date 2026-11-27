@@ -64,7 +64,7 @@ durante el tiempo de trabajo, bloquea webs que distraen editando el archivo `hos
 ## Estado
 - [x] Fase 1: ventana + temporizador + pitido + vibración (probada por el usuario).
 - [x] Fase 2: bloqueo con hosts + recuperación (probada por el usuario).
-- [x] Fase 3: ajustes, config.json, .exe (pendiente de prueba del usuario en Windows).
+- [x] Fase 3: ajustes, config.json, .exe (probada por el usuario; .exe anclado al escritorio).
 
 ## Limitaciones conocidas
 - DNS seguro (DoH) del navegador, VPN o proxy pueden saltarse hosts.
